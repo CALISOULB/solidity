@@ -61,7 +61,7 @@ BOOST_AUTO_TEST_CASE(single_single_line)
 	BOOST_CHECK_EQUAL(value, "Hello World");
 
 	tie(key, value, ok) = *++current;
-	BOOST_CHECK(ok);
+	BOOST_CHECK(!ok);
 	BOOST_CHECK_EQUAL(key, "");
 	BOOST_CHECK_EQUAL(value, "");
 	BOOST_CHECK(current == p.end());
@@ -104,7 +104,7 @@ BOOST_AUTO_TEST_CASE(value_space_trimmed)
 	auto [key, value, ok] = *splitDoxyStyleComments("@key  \t  Some \tText  \t  ").begin();
 	BOOST_CHECK(ok);
 	BOOST_CHECK_EQUAL(key, "key");
-	BOOST_CHECK_EQUAL(value, "Some  \tText");
+	BOOST_CHECK_EQUAL(value, "Some \tText");
 }
 
 BOOST_AUTO_TEST_CASE(multiline_entries)
@@ -132,7 +132,7 @@ BOOST_AUTO_TEST_CASE(multiline_entries)
 	BOOST_CHECK_EQUAL(value, "Good bye.");
 
 	tie(key, value, ok) = *++current;
-	BOOST_CHECK(ok);
+	BOOST_CHECK(!ok);
 	BOOST_CHECK_EQUAL(key, "");
 	BOOST_CHECK_EQUAL(value, "");
 	BOOST_CHECK(current == p.end());

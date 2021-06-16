@@ -32,28 +32,13 @@
 #include <boost/algorithm/string.hpp>
 
 #include <algorithm>
+#include <regex>
 
 using namespace std;
 using namespace solidity;
 using namespace solidity::util;
 using namespace solidity::langutil;
 using namespace solidity::yul;
-
-namespace
-{
-
-[[nodiscard]]
-shared_ptr<DebugData const> updateLocationEndFrom(
-	shared_ptr<DebugData const> const& _debugData,
-	langutil::SourceLocation const& _location
-)
-{
-	SourceLocation updatedLocation = _debugData->location;
-	updatedLocation.end = _location.end;
-	return make_shared<DebugData const>(updatedLocation);
-}
-
-}
 
 unique_ptr<Block> Parser::parse(std::shared_ptr<Scanner> const& _scanner, bool _reuseScanner)
 {
@@ -78,16 +63,99 @@ unique_ptr<Block> Parser::parse(std::shared_ptr<Scanner> const& _scanner, bool _
 	return nullptr;
 }
 
+bool Parser::updateLocation()
+{
+	m_documentedLocation.reset();
+	if (m_scanner->currentCommentLiteral().empty())
+		return false;
+
+
+	// parse doxygen style comment with a sequence of key/value pairs
+
+	// key-value splitter
+	static std::regex const lineRE = std::regex(
+		R"~~~(^\s*@([^\s]+)\s*(.*)(\r\n|\n|$))~~~",
+		std::regex_constants::ECMAScript | std::regex_constants::optimize
+	);
+
+	bool found = false;
+	string_view text = m_scanner->currentCommentLiteral();
+	while (!text.empty())
+	{
+		std::cmatch cm;
+		if (!std::regex_search(text.data(), text.data() + text.size(), cm, lineRE))
+			break;
+
+		auto const name = std::string_view{cm[1].first, static_cast<size_t>(cm[1].length())};
+		auto value = std::string_view{cm[2].first, static_cast<size_t>(cm[2].length())};
+		while (!value.empty() && std::isspace(value.back()))
+			value.remove_suffix(1);
+
+		// consume line and consume consecutive newlines, empty lines, and leading spaces
+		text.remove_prefix(static_cast<size_t>(cm[0].length()));
+		while (!text.empty() && std::isspace(text.empty()))
+			text.remove_prefix(1);
+
+		if (name == "use-src"sv)
+		{
+			// Don't handle that for now.
+		}
+		else if (name == "src"sv)
+		{
+			// Value is of form: <sourceIndex>:<start>,<end>
+			regex const sourceMatchSyntax(
+				R"~~~(^(\d+):(-1|\d+):(-1|\d+)$)~~~",
+				std::regex_constants::ECMAScript | std::regex_constants::optimize
+			);
+
+			cmatch sm;
+			regex_search(value.data(), value.data() + value.size(), sm, sourceMatchSyntax);
+
+			solAssert(sm.size() == 4, "");
+			auto const sourceIndex = static_cast<unsigned>(stoul(sm[1].str()));
+			auto const start = stoi(sm[2].str());
+			auto const end = stoi(sm[3].str());
+
+			solAssert(!!m_charStreamForSourceIndex, "");
+			auto charStream = m_charStreamForSourceIndex(sourceIndex);
+			solAssert(charStream, "");
+
+			m_documentedLocation = SourceLocation{start, end, charStream};
+			found = true;
+		}
+		// otherwise, ignore unknown keys for now
+	}
+	return found;
+}
+
+[[nodiscard]]
+shared_ptr<DebugData const> Parser::updateLocationEndFrom(
+	shared_ptr<DebugData const> const& _debugData,
+	langutil::SourceLocation const& _location,
+	bool _fromDoc
+)
+{
+	if (_fromDoc)
+		return _debugData;
+
+	SourceLocation updatedLocation = _debugData->location;
+	updatedLocation.end = _location.end;
+
+	return make_shared<DebugData const>(updatedLocation);
+}
+
 Block Parser::parseBlock()
 {
 	RecursionGuard recursionGuard(*this);
-	Block block = createWithLocation<Block>();
+	auto [block, fromDoc] = createWithLocation<Block>();
+	auto const savedLocation = block.debugData->location;
 	expectToken(Token::LBrace);
 	while (currentToken() != Token::RBrace)
 		block.statements.emplace_back(parseStatement());
-	block.debugData = updateLocationEndFrom(block.debugData, currentLocation());
+	solAssert(savedLocation == block.debugData->location, "");
+	block.debugData = updateLocationEndFrom(block.debugData, currentLocation(), fromDoc);
 	advance();
-	return block;
+	return move(block);
 }
 
 Statement Parser::parseStatement()
@@ -103,15 +171,16 @@ Statement Parser::parseStatement()
 		return parseBlock();
 	case Token::If:
 	{
-		If _if = createWithLocation<If>();
+		auto [_if, fromDoc] = createWithLocation<If>();
 		advance();
 		_if.condition = make_unique<Expression>(parseExpression());
 		_if.body = parseBlock();
+		_if.debugData = updateLocationEndFrom(_if.debugData, currentLocation(), fromDoc);
 		return Statement{move(_if)};
 	}
 	case Token::Switch:
 	{
-		Switch _switch = createWithLocation<Switch>();
+		auto [_switch, fromDoc] = createWithLocation<Switch>();
 		advance();
 		_switch.expression = make_unique<Expression>(parseExpression());
 		while (currentToken() == Token::Case)
@@ -124,31 +193,34 @@ Statement Parser::parseStatement()
 			fatalParserError(4904_error, "Case not allowed after default case.");
 		if (_switch.cases.empty())
 			fatalParserError(2418_error, "Switch statement without any cases.");
-		_switch.debugData = updateLocationEndFrom(_switch.debugData, _switch.cases.back().body.debugData->location);
+		_switch.debugData = updateLocationEndFrom(_switch.debugData, _switch.cases.back().body.debugData->location, fromDoc);
 		return Statement{move(_switch)};
 	}
 	case Token::For:
 		return parseForLoop();
 	case Token::Break:
 	{
-		Statement stmt{createWithLocation<Break>()};
+		auto [stmt, fromDoc] = createWithLocation<Break>();
 		checkBreakContinuePosition("break");
 		advance();
+		stmt.debugData = updateLocationEndFrom(stmt.debugData, currentLocation(), fromDoc);
 		return stmt;
 	}
 	case Token::Continue:
 	{
-		Statement stmt{createWithLocation<Continue>()};
+		auto [stmt, fromDoc] = createWithLocation<Continue>();
 		checkBreakContinuePosition("continue");
 		advance();
+		stmt.debugData = updateLocationEndFrom(stmt.debugData, currentLocation(), fromDoc);
 		return stmt;
 	}
 	case Token::Leave:
 	{
-		Statement stmt{createWithLocation<Leave>()};
+		auto [stmt, fromDoc] = createWithLocation<Leave>();
 		if (!m_insideFunction)
 			m_errorReporter.syntaxError(8149_error, currentLocation(), "Keyword \"leave\" can only be used inside a function.");
 		advance();
+		stmt.debugData = updateLocationEndFrom(stmt.debugData, currentLocation(), fromDoc);
 		return stmt;
 	}
 	default:
@@ -206,7 +278,7 @@ Statement Parser::parseStatement()
 		expectToken(Token::AssemblyAssign);
 
 		assignment.value = make_unique<Expression>(parseExpression());
-		assignment.debugData = updateLocationEndFrom(assignment.debugData, locationOf(*assignment.value));
+		assignment.debugData = updateLocationEndFrom(assignment.debugData, locationOf(*assignment.value), false);
 
 		return Statement{move(assignment)};
 	}
@@ -222,7 +294,7 @@ Statement Parser::parseStatement()
 Case Parser::parseCase()
 {
 	RecursionGuard recursionGuard(*this);
-	Case _case = createWithLocation<Case>();
+	auto [_case, fromDoc] = createWithLocation<Case>();
 	if (currentToken() == Token::Default)
 		advance();
 	else if (currentToken() == Token::Case)
@@ -236,8 +308,8 @@ Case Parser::parseCase()
 	else
 		yulAssert(false, "Case or default case expected.");
 	_case.body = parseBlock();
-	_case.debugData = updateLocationEndFrom(_case.debugData, _case.body.debugData->location);
-	return _case;
+	_case.debugData = updateLocationEndFrom(_case.debugData, _case.body.debugData->location, fromDoc);
+	return move(_case);
 }
 
 ForLoop Parser::parseForLoop()
@@ -246,7 +318,7 @@ ForLoop Parser::parseForLoop()
 
 	ForLoopComponent outerForLoopComponent = m_currentForLoopComponent;
 
-	ForLoop forLoop = createWithLocation<ForLoop>();
+	auto [forLoop, fromDoc] = createWithLocation<ForLoop>();
 	expectToken(Token::For);
 	m_currentForLoopComponent = ForLoopComponent::ForLoopPre;
 	forLoop.pre = parseBlock();
@@ -256,11 +328,11 @@ ForLoop Parser::parseForLoop()
 	forLoop.post = parseBlock();
 	m_currentForLoopComponent = ForLoopComponent::ForLoopBody;
 	forLoop.body = parseBlock();
-	forLoop.debugData = updateLocationEndFrom(forLoop.debugData, forLoop.body.debugData->location);
+	forLoop.debugData = updateLocationEndFrom(forLoop.debugData, forLoop.body.debugData->location, fromDoc);
 
 	m_currentForLoopComponent = outerForLoopComponent;
 
-	return forLoop;
+	return move(forLoop);
 }
 
 Expression Parser::parseExpression()
@@ -295,9 +367,9 @@ variant<Literal, Identifier> Parser::parseLiteralOrIdentifier()
 	{
 	case Token::Identifier:
 	{
-		Identifier identifier{DebugData::create(currentLocation()), YulString{currentLiteral()}};
+		auto [identifier, _] = createWithLocation<Identifier>(YulString{currentLiteral()});
 		advance();
-		return identifier;
+		return move(identifier);
 	}
 	case Token::StringLiteral:
 	case Token::HexStringLiteral:
@@ -325,17 +397,16 @@ variant<Literal, Identifier> Parser::parseLiteralOrIdentifier()
 			break;
 		}
 
-		Literal literal{
-			DebugData::create(currentLocation()),
+		auto [literal, fromDoc] = createWithLocation<Literal>(
 			kind,
 			YulString{currentLiteral()},
 			kind == LiteralKind::Boolean ? m_dialect.boolType : m_dialect.defaultType
-		};
+		);
 		advance();
 		if (currentToken() == Token::Colon)
 		{
 			expectToken(Token::Colon);
-			literal.debugData = updateLocationEndFrom(literal.debugData, currentLocation());
+			literal.debugData = updateLocationEndFrom(literal.debugData, currentLocation(), fromDoc);
 			literal.type = expectAsmIdentifier();
 		}
 
@@ -353,7 +424,7 @@ variant<Literal, Identifier> Parser::parseLiteralOrIdentifier()
 VariableDeclaration Parser::parseVariableDeclaration()
 {
 	RecursionGuard recursionGuard(*this);
-	VariableDeclaration varDecl = createWithLocation<VariableDeclaration>();
+	auto [varDecl, fromDoc] = createWithLocation<VariableDeclaration>();
 	expectToken(Token::Let);
 	while (true)
 	{
@@ -367,12 +438,12 @@ VariableDeclaration Parser::parseVariableDeclaration()
 	{
 		expectToken(Token::AssemblyAssign);
 		varDecl.value = make_unique<Expression>(parseExpression());
-		varDecl.debugData = updateLocationEndFrom(varDecl.debugData, locationOf(*varDecl.value));
+		varDecl.debugData = updateLocationEndFrom(varDecl.debugData, locationOf(*varDecl.value), fromDoc);
 	}
 	else
-		varDecl.debugData = updateLocationEndFrom(varDecl.debugData, varDecl.variables.back().debugData->location);
+		varDecl.debugData = updateLocationEndFrom(varDecl.debugData, varDecl.variables.back().debugData->location, fromDoc);
 
-	return varDecl;
+	return move(varDecl);
 }
 
 FunctionDefinition Parser::parseFunctionDefinition()
@@ -389,7 +460,7 @@ FunctionDefinition Parser::parseFunctionDefinition()
 	ForLoopComponent outerForLoopComponent = m_currentForLoopComponent;
 	m_currentForLoopComponent = ForLoopComponent::None;
 
-	FunctionDefinition funDef = createWithLocation<FunctionDefinition>();
+	auto [funDef, fromDoc] = createWithLocation<FunctionDefinition>();
 	expectToken(Token::Function);
 	funDef.name = expectAsmIdentifier();
 	expectToken(Token::LParen);
@@ -416,10 +487,10 @@ FunctionDefinition Parser::parseFunctionDefinition()
 	m_insideFunction = true;
 	funDef.body = parseBlock();
 	m_insideFunction = preInsideFunction;
-	funDef.debugData = updateLocationEndFrom(funDef.debugData, funDef.body.debugData->location);
+	funDef.debugData = updateLocationEndFrom(funDef.debugData, funDef.body.debugData->location, fromDoc);
 
 	m_currentForLoopComponent = outerForLoopComponent;
-	return funDef;
+	return move(funDef);
 }
 
 FunctionCall Parser::parseCall(variant<Literal, Identifier>&& _initialOp)
@@ -443,7 +514,7 @@ FunctionCall Parser::parseCall(variant<Literal, Identifier>&& _initialOp)
 			ret.arguments.emplace_back(parseExpression());
 		}
 	}
-	ret.debugData = updateLocationEndFrom(ret.debugData, currentLocation());
+	ret.debugData = updateLocationEndFrom(ret.debugData, currentLocation(), false);
 	expectToken(Token::RParen);
 	return ret;
 }
@@ -451,18 +522,18 @@ FunctionCall Parser::parseCall(variant<Literal, Identifier>&& _initialOp)
 TypedName Parser::parseTypedName()
 {
 	RecursionGuard recursionGuard(*this);
-	TypedName typedName = createWithLocation<TypedName>();
+	auto [typedName, fromDoc] = createWithLocation<TypedName>();
 	typedName.name = expectAsmIdentifier();
 	if (currentToken() == Token::Colon)
 	{
 		expectToken(Token::Colon);
-		typedName.debugData = updateLocationEndFrom(typedName.debugData, currentLocation());
+		typedName.debugData = updateLocationEndFrom(typedName.debugData, currentLocation(), fromDoc);
 		typedName.type = expectAsmIdentifier();
 	}
 	else
 		typedName.type = m_dialect.defaultType;
 
-	return typedName;
+	return move(typedName);
 }
 
 YulString Parser::expectAsmIdentifier()
@@ -509,3 +580,4 @@ bool Parser::isValidNumberLiteral(string const& _literal)
 	else
 		return _literal.find_first_not_of("0123456789") == string::npos;
 }
+

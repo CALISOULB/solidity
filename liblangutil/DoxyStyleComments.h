@@ -31,7 +31,7 @@ namespace solidity::langutil
 /// - Keys must start with '@' (but are not exposed with their leading '@').
 /// - Key key name currently may contain any character except a leading '@' and a trailing space (0x20).
 /// - Values are space-trimmed on both sides are located on the right side of the key.
-/// - Currently values CANNOT spam multiple lines, only single lines.
+/// - Currently values CANNOT span multiple lines, only single lines.
 inline auto splitDoxyStyleComments(std::string_view _text)
 {
 	struct KeyValuePairsParser
