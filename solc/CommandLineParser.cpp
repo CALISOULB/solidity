@@ -270,7 +270,7 @@ bool checkMutuallyExclusive(boost::program_options::variables_map const& args, s
 
 }
 
-bool OutputSelection::operator==(OutputSelection const& _other) const
+bool OutputSelection::operator==(OutputSelection const& _other) const noexcept
 {
 	static_assert(
 		sizeof(*this) == 15 * sizeof(bool),
@@ -295,7 +295,7 @@ bool OutputSelection::operator==(OutputSelection const& _other) const
 		storageLayout == _other.storageLayout;
 }
 
-bool CombinedJsonRequests::operator==(CombinedJsonRequests const& _other) const
+bool CombinedJsonRequests::operator==(CombinedJsonRequests const& _other) const noexcept
 {
 	static_assert(
 		sizeof(*this) == 17 * sizeof(bool),
@@ -322,7 +322,7 @@ bool CombinedJsonRequests::operator==(CombinedJsonRequests const& _other) const
 		ast == _other.ast;
 }
 
-bool CommandLineOptions::operator==(CommandLineOptions const& _other) const
+bool CommandLineOptions::operator==(CommandLineOptions const& _other) const noexcept
 {
 	return
 		sourceFilePaths == _other.sourceFilePaths &&
