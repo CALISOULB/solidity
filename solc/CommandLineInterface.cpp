@@ -86,10 +86,10 @@ using namespace solidity::langutil;
 namespace solidity::frontend
 {
 
-static bool g_hasOutput = false;
-
 namespace
 {
+
+static bool g_hasOutput = false;
 
 std::ostream& sout(bool _used = true)
 {
@@ -305,7 +305,7 @@ void CommandLineInterface::handleStorageLayout(string const& _contract)
 
 void CommandLineInterface::handleNatspec(bool _natspecDev, string const& _contract)
 {
-	bool enabled;
+	bool enabled = false;
 	std::string suffix;
 	std::string title;
 
@@ -626,12 +626,7 @@ bool CommandLineInterface::compile()
 		}
 
 		if (!successful)
-		{
-			if (m_options.errorRecovery)
-				return true;
-			else
-				return false;
-		}
+			return m_options.errorRecovery;
 	}
 	catch (CompilerError const& _exception)
 	{

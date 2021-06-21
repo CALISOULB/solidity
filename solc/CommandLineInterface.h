@@ -38,7 +38,7 @@ namespace solidity::frontend
 class CommandLineInterface
 {
 public:
-	CommandLineInterface(CommandLineOptions const& _options = CommandLineOptions{}):
+	explicit CommandLineInterface(CommandLineOptions const& _options = CommandLineOptions{}):
 		m_options(_options)
 	{}
 
