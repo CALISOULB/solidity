@@ -35,8 +35,8 @@ class ImportRemapper
 public:
 	struct Remapping
 	{
-		bool operator!=(Remapping const& _other) const { return !(*this == _other); }
-		bool operator==(Remapping const& _other) const
+		bool operator!=(Remapping const& _other) const noexcept { return !(*this == _other); }
+		bool operator==(Remapping const& _other) const noexcept
 		{
 			return
 				context == _other.context &&

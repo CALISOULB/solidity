@@ -44,8 +44,8 @@ struct ModelCheckerContracts
 		return has(_source) && contracts.at(_source).count(_contract);
 	}
 
-	bool operator!=(ModelCheckerContracts const& _other) const { return !(*this == _other); }
-	bool operator==(ModelCheckerContracts const& _other) const { return contracts == _other.contracts; }
+	bool operator!=(ModelCheckerContracts const& _other) const noexcept { return !(*this == _other); }
+	bool operator==(ModelCheckerContracts const& _other) const noexcept { return contracts == _other.contracts; }
 
 	/// Represents which contracts should be analyzed by the SMTChecker
 	/// as the most derived.
@@ -83,8 +83,8 @@ struct ModelCheckerEngine
 		return {};
 	}
 
-	bool operator!=(ModelCheckerEngine const& _other) const { return !(*this == _other); }
-	bool operator==(ModelCheckerEngine const& _other) const { return bmc == _other.bmc && chc == _other.chc; }
+	bool operator!=(ModelCheckerEngine const& _other) const noexcept { return !(*this == _other); }
+	bool operator==(ModelCheckerEngine const& _other) const noexcept { return bmc == _other.bmc && chc == _other.chc; }
 };
 
 enum class VerificationTargetType { ConstantCondition, Underflow, Overflow, UnderOverflow, DivByZero, Balance, Assert, PopEmptyArray, OutOfBounds };
@@ -103,8 +103,8 @@ struct ModelCheckerTargets
 
 	static std::map<std::string, VerificationTargetType> const targetStrings;
 
-	bool operator!=(ModelCheckerTargets const& _other) const { return !(*this == _other); }
-	bool operator==(ModelCheckerTargets const& _other) const { return targets == _other.targets; }
+	bool operator!=(ModelCheckerTargets const& _other) const noexcept { return !(*this == _other); }
+	bool operator==(ModelCheckerTargets const& _other) const noexcept { return targets == _other.targets; }
 
 	std::set<VerificationTargetType> targets;
 };
@@ -116,8 +116,8 @@ struct ModelCheckerSettings
 	ModelCheckerTargets targets = ModelCheckerTargets::Default();
 	std::optional<unsigned> timeout;
 
-	bool operator!=(ModelCheckerSettings const& _other) const { return !(*this == _other); }
-	bool operator==(ModelCheckerSettings const& _other) const
+	bool operator!=(ModelCheckerSettings const& _other) const noexcept { return !(*this == _other); }
+	bool operator==(ModelCheckerSettings const& _other) const noexcept
 	{
 		return
 			contracts == _other.contracts &&
